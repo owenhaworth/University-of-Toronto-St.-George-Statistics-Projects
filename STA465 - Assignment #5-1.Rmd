@@ -1,0 +1,824 @@
+---
+title: 'STA465 - Assignment #5'
+author: "Owen Haworth"
+date: "02/04/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE, warning = FALSE}
+# R packages:
+library(sf)
+library(INLA)
+library(SpatialEpi)
+library(tidyverse)
+library(spdep)
+library(tmap)
+library(geoR)
+library(sp)
+library(rgdal)
+library(raster)
+library(geodist)
+library(tibble)
+```
+
+# Question 1: Sloths in Costa Rica
+## Question 1.1
+```{r, message = FALSE}
+load("~/Hwk5Data.RData")
+
+grid
+
+st_crs(grid)
+```
+
+The class of the grid data set is a spatial polygons data frame (spatial polygons class).
+
+The coordinate reference system (CRS) of the grid data set (grid) is
+"+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0". The CRS is a
+geographic (geographic coordinate system) with units in degrees for both longitude
+and latitude. Also, the CRS has a World Geodetic System 1984 ("WGS 84") datum,
+a World Geodetic System 1984 ("WGS 84") ellipsoid, and a "+towgs84=0,0,0" conversion
+factor.
+
+## Question 1.2
+#### Model #1: Setting Weakly Informative Priors for the 'iid' and 'rw2d' Components
+```{r}
+ncol <- ncol(r)
+
+formula.grid1 <- Y ~ 1 + cov +
+  f(id, model = "rw2d", nrow = nrow, ncol = ncol, hyper = list(prec = list(prior = "loggamma", param = c(1, 1/1000)))) +
+  f(id2, model = "iid", hyper = list(prec = list(prior = "loggamma", param = c(1, 1/1000))))
+
+res.grid1 <- inla(formula.grid1, family = "poisson", data = grid@data, E = cellarea,
+                  control.predictor = list(compute = TRUE))
+
+summary(res.grid1)
+
+# Mean and 95% Credible Intervals of the Estimated Parameters for the Model Table:
+res.grid1.ci.table <- matrix(c(-2.443, -5.525, 0.234, 0.020, 0.007, 0.034,
+                               0.431, 0.133, 1.140, 0.240, 0.164, 0.341),
+                             nrow = 4, ncol = 3, byrow = TRUE)
+
+colnames(res.grid1.ci.table) <- c("Mean", "Lower Bound", "Upper Bound")
+rownames(res.grid1.ci.table) <- c("Beta 0", "Beta 1", "id", "id2")
+names(dimnames(res.grid1.ci.table)) <-
+  list("", "Mean & 95% Credible Intervals for Model #1")
+
+res.grid1.ci.table <- as.table(res.grid1.ci.table)
+res.grid1.ci.table
+```
+
+#### Model #2: Setting Noninformative Priors for the 'iid' and 'rw2d' Components
+```{r}
+formula.grid2 <- Y ~ 1 + cov +
+  f(id, model = "rw2d", nrow = nrow, ncol = ncol, hyper = list(prec = list(prior = "loggamma", param = c(1000, 1/1000)))) +
+  f(id2, model = "iid", hyper = list(prec = list(prior = "loggamma", param = c(1000, 1/1000))))
+
+res.grid2 <- inla(formula.grid2, family = "poisson", data = grid@data, E = cellarea, control.predictor = list(compute = TRUE))
+
+summary(res.grid2)
+
+summary(res.grid2)$hyperpar[1]
+
+# Mean and 95% Credible Intervals of the Estimated Parameters for the Model Table:
+res.grid2.ci.table <- matrix(c(-0.479, -1.419, 0.407, 0.028, 0.023, 0.032,
+                               999711.1, 938638.54, 1063114.06,
+                               999979.9, 939012.59, 1063446.37),
+                             nrow = 4, ncol = 3, byrow = TRUE)
+
+colnames(res.grid2.ci.table) <- c("Mean", "Lower Bound", "Upper Bound")
+rownames(res.grid2.ci.table) <- c("Beta 0", "Beta 1", "id", "id2")
+names(dimnames(res.grid2.ci.table)) <-
+  list("", "Mean & 95% Credible Intervals for Model #2")
+
+res.grid2.ci.table <- as.table(res.grid2.ci.table)
+res.grid2.ci.table
+```
+
+There are large differences for the 'iid' and 'rw2d' components between model #1
+and model #2. Model #2 has much larger mean estimates and 95% credible intervals
+for the 'iid' and 'rw2d' components compared to Model #1, which is because the
+noninformative priors for the 'iid' and 'rw2d' components are giantic assumptions,
+whereas the weakly informative priors are closer to the actual values of the
+parameters (not a gigantic assumption). In addition, when comparing the models,
+Model #2 has larger mean estimates for Beta 0 and Beta 1, but their corresponding
+95% credible intervals are smaller.
+
+## Question 1.3
+#### Model #1: Setting Weakly Informative Priors for the 'iid' and 'rw2d' Components
+```{r, message = FALSE}
+# Maps of the random Effects (both rw2d and iid):
+grid$re_rw2d.M1 <- res.grid1$summary.random$id[grid$id, "mean"]
+grid$re_iid.M1 <- res.grid1$summary.random$id2[, "mean"]
+
+tmap_mode("plot")
+tm_shape(grid) +
+  tm_polygons(col = c("re_rw2d.M1", "re_iid.M1"), style = "cont", border.col = "transparent") +
+  tm_shape(gridborder) +
+  tm_borders() +
+  tm_facets(ncol = 2) +
+  tm_legend(legend.position = c("left", "bottom"))
+
+# Maps of the Predicted Counts Per Cell, and the Lower and Upper Limits of the 95% Credible Interval:
+cellarea <- resolution * resolution
+
+grid$pred.counts.M1 <- res.grid1$summary.fitted.values[, "mean"] * cellarea
+grid$pred.counts.LL.M1 <- res.grid1$summary.fitted.values[, "0.025quant"] * cellarea
+grid$pred.counts.UL.M1 <- res.grid1$summary.fitted.values[, "0.975quant"] * cellarea
+
+tmap_mode("plot")
+tm_shape(grid) +
+  tm_polygons(col = c("pred.counts.M1", "pred.counts.LL.M1", "pred.counts.UL.M1"),
+              style = 'fixed', border.col = "transparent",
+              breaks = seq(0, ceiling(max(grid$pred.counts.UL.M1)) + 4, 10)) +
+  tm_shape(gridborder) +
+  tm_borders() +
+  tm_facets(ncol = 3) +
+  tm_legend(legend.position = c("left", "bottom"))
+```
+
+#### Model #2: Setting Noninformative Priors for the 'iid' and 'rw2d' Components
+```{r, message = FALSE}
+# Maps of the random Effects (both rw2d and iid):
+grid$re_rw2d.M2 <- res.grid2$summary.random$id[grid$id, "mean"]
+grid$re_iid.M2 <- res.grid2$summary.random$id2[, "mean"]
+
+tmap_mode("plot")
+tm_shape(grid) +
+  tm_polygons(col = c("re_rw2d.M2", "re_iid.M2"), style = "cont", border.col = "transparent") +
+  tm_shape(gridborder) +
+  tm_borders() +
+  tm_facets(ncol = 2) +
+  tm_legend(legend.position = c("left", "bottom"))
+
+# Maps of the Predicted Counts Per Cell, and the Lower and Upper Limits of the 95% Credible Interval:
+cellarea <- resolution * resolution
+
+grid$pred.counts.M2 <- res.grid2$summary.fitted.values[, "mean"] * cellarea
+grid$pred.counts.LL.M2 <- res.grid2$summary.fitted.values[, "0.025quant"] * cellarea
+grid$pred.counts.UL.M2 <- res.grid2$summary.fitted.values[, "0.975quant"] * cellarea
+
+tmap_mode("plot")
+tm_shape(grid) +
+  tm_polygons(col = c("pred.counts.M2", "pred.counts.LL.M2", "pred.counts.UL.M2"),
+              style = 'fixed', border.col = "transparent",
+              breaks = seq(0, ceiling(max(grid$pred.counts.UL.M2)), 0.5)) +
+  tm_shape(gridborder) +
+  tm_borders() +
+  tm_facets(ncol = 3) +
+  tm_legend(legend.position = c("left", "bottom"))
+```
+
+# Question 2:
+## Question 2.1
+```{r, message = FALSE}
+# Getting data and setting it up
+data(pennLC)
+population <- pennLC$data$population
+cases <- pennLC$data$cases
+n.strata <- 16
+E <- expected(population, cases, n.strata)
+d <- aggregate(x = pennLC$data$cases, by = list(county = pennLC$data$county), FUN = sum)
+
+# From spatial polygon to simple feature
+pennLC.sf <- st_as_sf(pennLC$spatial.polygon)
+pennLC.sf$county <- d$county
+pennLC.sf$counts <- d$x
+pennLC.sf$E <- E[match(pennLC.sf$county, unique(pennLC$data$county))]
+pennLC.sf <- merge(pennLC.sf, pennLC$smoking, by.x = "county", by.y = "county")
+pennLC.sf <- pennLC.sf%>%
+  mutate(SIR = counts/E)
+
+## Values of E_i and neighborhood structure
+E.penn <- pennLC.sf$E
+neighbor.penn <- poly2nb(pennLC.sf)
+
+nb2INLA("npenn.adj", neighbor.penn)
+g <- inla.read.graph(filename = "npenn.adj")
+
+pennLC.sf$re_u <- 1:nrow(pennLC.sf)
+pennLC.sf$re_v <- 1:nrow(pennLC.sf)
+```
+
+#### Model #1: Complete Pooling and Smoking Covariate (no random effects)
+```{r, message = FALSE}
+formula.penn1 <- counts ~ smoking
+
+res.penn1 <- inla(formula.penn1, family = "poisson", data = pennLC.sf, E = E.penn,
+                  control.predictor = list(compute = TRUE),
+                  control.compute = list(cpo = TRUE))
+
+summary(res.penn1)
+
+# CPO Values:
+res.penn1$cpo$cpo
+
+# PIT Values:
+res.penn1$cpo$pit
+
+# Map for predicted count of lung cancer cases across Pennsylvania:
+pennLC.sf$Model1.Pred <- res.penn1$summary.fitted.values[,"mean"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model1.Pred", title = "Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+
+# Map for standard deviation (SD) of predicted counts of lung cancer cases across Pennsylvania:
+pennLC.sf$Model1.SD <- res.penn1$summary.fitted.values[,"sd"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model1.SD", title = "SD of Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+```
+
+#### Model #2: Hierarchical Random Effect (iid) - (intercept only)
+```{r, message = FALSE}
+formula.penn2 <- counts ~ f(re_v, model = "iid")
+
+res.penn2 <- inla(formula.penn2, family = "poisson", data = pennLC.sf, E = E.penn,
+                  control.predictor = list(compute = TRUE),
+                  control.compute = list(cpo = TRUE))
+
+summary(res.penn2)
+
+# CPO Values:
+res.penn2$cpo$cpo
+
+# PIT Values:
+res.penn2$cpo$pit
+
+# Map for predicted count of lung cancer cases across Pennsylvania:
+pennLC.sf$Model2.Pred <- res.penn2$summary.fitted.values[,"mean"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model2.Pred", title = "Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+
+# Map for standard deviation (SD) of predicted counts of lung cancer cases across Pennsylvania:
+pennLC.sf$Model2.SD <- res.penn2$summary.fitted.values[,"sd"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model2.SD", title = "SD of Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+```
+
+#### Model #3: Hierarchical Random Effect (iid) + Smoking Covariate
+```{r, message = FALSE}
+formula.penn3 <- counts ~ smoking + f(re_v, model = "iid")
+
+res.penn3 <- inla(formula.penn3, family = "poisson", data = pennLC.sf, E = E.penn,
+                  control.predictor = list(compute = TRUE),
+                  control.compute = list(cpo = TRUE))
+
+summary(res.penn3)
+
+# CPO Values:
+res.penn3$cpo$cpo
+
+# PIT Values:
+res.penn3$cpo$pit
+
+# Map for predicted count of lung cancer cases across Pennsylvania:
+pennLC.sf$Model3.Pred <- res.penn3$summary.fitted.values[,"mean"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model3.Pred", title = "Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+
+# Map for standard deviation (SD) of predicted counts of lung cancer cases across Pennsylvania:
+pennLC.sf$Model3.SD <- res.penn3$summary.fitted.values[,"sd"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model3.SD", title = "SD of Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+```
+
+#### Model #4: Spatial + iid Random Effect
+```{r, message = FALSE}
+formula.penn4 <- counts ~ f(re_u, model = "besag", graph = g) + f(re_v, model = "iid")
+
+res.penn4 <- inla(formula.penn4, family = "poisson", data = pennLC.sf, E = E.penn,
+                  control.predictor = list(compute = TRUE),
+                  control.compute = list(cpo = TRUE))
+
+summary(res.penn4)
+
+# CPO Values:
+res.penn4$cpo$cpo
+
+# PIT Values:
+res.penn4$cpo$pit
+
+# Map for predicted count of lung cancer cases across Pennsylvania:
+pennLC.sf$Model4.Pred <- res.penn4$summary.fitted.values[,"mean"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model4.Pred", title = "Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+
+# Map for standard deviation (SD) of predicted counts of lung cancer cases across Pennsylvania:
+pennLC.sf$Model4.SD <- res.penn4$summary.fitted.values[,"sd"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model4.SD", title = "SD of Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+```
+
+#### Model #5: Spatial + iid Random Effect + Smoking Covariate
+```{r, message = FALSE}
+formula.penn5 <- counts ~ smoking + f(re_u, model = "besag", graph = g) + f(re_v, model = "iid")
+
+res.penn5 <- inla(formula.penn5, family = "poisson", data = pennLC.sf, E = E.penn,
+                  control.predictor = list(compute = TRUE),
+                  control.compute = list(cpo = TRUE))
+
+summary(res.penn5)
+
+# CPO Values:
+res.penn5$cpo$cpo
+
+# PIT Values:
+res.penn5$cpo$pit
+
+# Map for predicted count of lung cancer cases across Pennsylvania:
+pennLC.sf$Model5.Pred <- res.penn5$summary.fitted.values[,"mean"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model5.Pred", title = "Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+
+# Map for standard deviation (SD) of predicted counts of lung cancer cases across Pennsylvania:
+pennLC.sf$Model5.SD <- res.penn5$summary.fitted.values[,"sd"]*E.penn
+
+tmap_mode("view")
+tm_basemap("Stamen.Terrain") +
+  tm_shape(pennLC.sf) +
+  tm_fill(col = "Model5.SD", title = "SD of Predicted Lung Cancer Counts") +
+  tm_tiles("Stamen.TerrainLabels") +
+  tm_borders()
+```
+
+The major differences in predicted lung cancer counts across models is that in
+Model #1 (Complete Pooling and Smoking Covariate (no random effects)), it seems that
+Model #1 has higher predicted lung cancer counts across the whole state than Model #5
+(Spatial + iid Random Effect + Smoking Covariate) as it has a darker yellow colours
+for the majority of the counties of Pennsylvania when looking at the maps. This is
+because Model #1 has no random effects so it does not capture as much as the variation
+(i.e. variation in counties (one county may smoke than another and another county
+may barely smoke)) as Model #5 (has random effects) does, which leads to inaccurate
+predictions. When looking at the graphs, as the random effects and fixed effects
+are added between models, there is less variation and more accurate predicted lung
+cancer counts. There is less predicted lung cancer counts when adding effects,
+due to a lighter yellow being observed on the map, which means overestimation was
+most likely reduced since variation reduced due to the random/fixed effects being added.
+
+## Question 2.2
+#### Model #1: Complete Pooling and Smoking Covariate (no random effects)
+```{r}
+summary(res.penn1)
+
+# sum(log(CPO)) for the Model:
+sum(log(res.penn1$cpo$cpo))
+
+# Mean and 95% Credible Intervals of the Estimated Parameters, and sum(log(CPO)) for the Model Table:
+res.penn1.ci.table <- matrix(c(-0.373, -0.547, -0.199, -287.857, 1.559, 0.839,
+                               2.279, -287.857), nrow = 2, ncol = 4, byrow = TRUE)
+
+colnames(res.penn1.ci.table) <- c("Mean", "Lower Bound", "Upper Bound",
+                             "sum(log(CPO)) for the Model")
+rownames(res.penn1.ci.table) <- c("Beta 0", "Beta 1")
+names(dimnames(res.penn1.ci.table)) <-
+  list("", "Mean, 95% Credible Intervals, & sum(log(CPO)) for Model #1")
+
+res.penn1.ci.table <- as.table(res.penn1.ci.table)
+res.penn1.ci.table
+
+# Histogram of the PIT Values for the Model:
+hist(res.penn1$cpo$pit, xlab = "PIT", main = "PIT Values for Model #1")
+```
+
+#### Model #2: Hierarchical Random Effect (iid) - (intercept only)
+```{r}
+summary(res.penn2)
+
+# sum(log(CPO)) for the Model:
+sum(log(res.penn2$cpo$cpo))
+
+# Mean and 95% Credible Intervals of the Estimated Parameters, and sum(log(CPO)) for the Model Table:
+res.penn2.ci.table <- matrix(c(-0.045, -0.082, -0.011, -267.3744, 135.71, 60.59,
+                               279.66, -267.3744), nrow = 2, ncol = 4, byrow = TRUE)
+
+colnames(res.penn2.ci.table) <- c("Mean", "Lower Bound", "Upper Bound",
+                             "sum(log(CPO)) for the Model")
+rownames(res.penn2.ci.table) <- c("Beta 0", "re_v")
+names(dimnames(res.penn2.ci.table)) <-
+  list("", "Mean, 95% Credible Intervals, & sum(log(CPO)) for Model #2")
+
+res.penn2.ci.table <- as.table(res.penn2.ci.table)
+res.penn2.ci.table
+
+# Histogram of the PIT Values for the Model:
+hist(res.penn2$cpo$pit, xlab = "PIT", main = "PIT Values for Model #2")
+```
+
+#### Model #3: Hierarchical Random Effect (iid) + Smoking Covariate
+```{r}
+summary(res.penn3)
+
+# sum(log(CPO)) for the Model:
+sum(log(res.penn3$cpo$cpo))
+
+# Mean and 95% Credible Intervals of the Estimated Parameters, and sum(log(CPO)) for the Model Table:
+res.penn3.ci.table <- matrix(c(-0.319, -0.642, 0.000, -267.0355, 1.158, -0.186,
+                               2.498, -267.0355, 150.90, 63.95, 330.68, -267.0355),
+                             nrow = 3, ncol = 4, byrow = TRUE)
+
+colnames(res.penn3.ci.table) <- c("Mean", "Lower Bound", "Upper Bound",
+                             "sum(log(CPO)) for the Model")
+rownames(res.penn3.ci.table) <- c("Beta 0", "Beta 1", "re_v")
+names(dimnames(res.penn3.ci.table)) <-
+  list("", "Mean, 95% Credible Intervals, & sum(log(CPO)) for Model #3")
+
+res.penn3.ci.table <- as.table(res.penn3.ci.table)
+res.penn3.ci.table
+
+# Histogram of the PIT Values for the Model:
+hist(res.penn3$cpo$pit, xlab = "PIT", main = "PIT Values for Model #3")
+```
+
+#### Model #4: Spatial + iid Random Effect
+```{r}
+summary(res.penn4)
+
+# sum(log(CPO)) for the Model:
+sum(log(res.penn4$cpo$cpo))
+
+# Mean and 95% Credible Intervals of the Estimated Parameters, and sum(log(CPO)) for the Model Table:
+res.penn4.ci.table <- matrix(c(-0.048, -0.077, -0.02, -263.0361, 77.38, 28.18,
+                               172.67, -263.0361, 17779.27, 1108.96, 65491.05, -263.0361),
+                             nrow = 3, ncol = 4, byrow = TRUE)
+
+colnames(res.penn4.ci.table) <- c("Mean", "Lower Bound", "Upper Bound",
+                             "sum(log(CPO)) for the Model")
+rownames(res.penn4.ci.table) <- c("Beta 0", "re_u", "re_v")
+names(dimnames(res.penn4.ci.table)) <-
+  list("", "Mean, 95% Credible Intervals, & sum(log(CPO)) for Model #4")
+
+res.penn4.ci.table <- as.table(res.penn4.ci.table)
+res.penn4.ci.table
+
+# Histogram of the PIT Values for the Model:
+hist(res.penn4$cpo$pit, xlab = "PIT", main = "PIT Values for Model #4")
+```
+
+#### Model #5: Spatial + iid Random Effect + Smoking Covariate
+```{r}
+summary(res.penn5)
+
+# sum(log(CPO)) for the Model:
+sum(log(res.penn5$cpo$cpo))
+
+# Mean and 95% Credible Intervals of the Estimated Parameters, and sum(log(CPO)) for the Model Table:
+res.penn5.ci.table <- matrix(c(-0.323, -0.621, -0.028, -261.9656, 1.156, -0.080,
+                               2.384, -261.9656, 92.67, 31.00, 221.44, -261.9656,
+                               18097.70, 1165.24, 66267.31, -261.9656),
+                             nrow = 4, ncol = 4, byrow = TRUE)
+
+colnames(res.penn5.ci.table) <- c("Mean", "Lower Bound", "Upper Bound",
+                             "sum(log(CPO)) for the Model")
+rownames(res.penn5.ci.table) <- c("Beta 0", "Beta 1", "re_u", "re_v")
+names(dimnames(res.penn5.ci.table)) <-
+  list("", "Mean, 95% Credible Intervals, & sum(log(CPO)) for Model #5")
+
+res.penn5.ci.table <- as.table(res.penn5.ci.table)
+res.penn5.ci.table
+
+# Histogram of the PIT Values for the Model:
+hist(res.penn5$cpo$pit, xlab = "PIT", main = "PIT Values for Model #5")
+```
+
+The model that has the best predictive performance as measured by sum log(CPO) is
+Model #5: Spatial + iid Random Effect + Smoking Covariate (the full model) because
+it has the highest sum log(CPO), -261.9656, which means the model makes better
+predictions of the observations (more accurate predictions) when compared to the
+other models. Hence, the model is a better fit for predictions when using the
+observations since the other models possibly have more outliers.
+
+# Question 3:
+#### INLA Model for 1st Fold:
+```{r, message = FALSE}
+load("~/Hwk4Data_STA465.RData")
+
+# To view the data to put into 4 folds
+tm_basemap(leaflet::providers$Stamen) + 
+  tm_shape(gambia.sf) + tm_dots(col = c("x", "y")) + 
+  tm_facets(ncol = 1)
+
+## Prediction data
+dp <- d %>% filter(x < 400000 & y < 1470000)
+dim(dp)
+
+# Estimation data
+dd <- d
+for (i in 1:length(dp$x)) {
+  dd <- dd %>% filter(x != dp$x[i])
+  }
+dim(dd)
+
+# Mesh construction
+coo <- cbind(dd$long, dd$lat)
+mesh <- inla.mesh.2d(loc = coo, max.edge = c(0.1, 5), cutoff = 0.01)
+plot(mesh)
+points(coo, col = "red")
+
+# SPDE2 Matérn
+spde <- inla.spde2.matern(mesh = mesh, alpha = 2, constr = TRUE)
+
+indexs <- inla.spde.make.index("s", spde$n.spde)
+A <- inla.spde.make.A(mesh = mesh, loc = coo)
+
+coop <- cbind("x" = dp$x, "y" = dp$y)
+Ap <- inla.spde.make.A(mesh = mesh, loc = coop)
+
+# stack for estimation stk.e
+stk.e <- inla.stack(tag = "est", data = list(y = dd$positive, numtrials = dd$total),
+                    A = list(1, A), effects = list(data.frame(b0 = 1, altitude = dd$alt), s = indexs))
+
+# stack for prediction stk.p
+stk.p <- inla.stack(tag = "pred", data = list(y = NA, numtrials = NA), A = list(1, Ap),
+                    effects = list(data.frame(b0 = 1, altitude = dp[, 8]), s = indexs))
+
+# stk.full has stk.e and stk.p
+stk.full <- inla.stack(stk.e, stk.p)
+
+formula <- y ~ 0 + b0 + altitude + f(s, model = spde)
+
+res.gambia <- inla(formula, family = "binomial", Ntrials = numtrials,
+                   control.family = list(link = "logit"),
+                   data = inla.stack.data(stk.full),
+                   control.predictor = list(compute = TRUE, link = 1, A = inla.stack.A(stk.full)))
+
+summary(res.gambia)
+
+# Computing (1/N)*sum((y_i - yhat_i)^2), where yhat_i is the out-of-sample predicted value of y_i given N_i
+index <- inla.stack.index(stack = stk.full, tag = "pred")$data
+gambia.mean.prev <- res.gambia$summary.fitted.values[index, "mean"]
+N_i <- dp$total
+gambia.y.hat <- gambia.mean.prev*N_i
+N <- sum(dp$total)
+(1/N)*(sum((dp$positive - gambia.y.hat)^2))
+```
+
+#### INLA Model for 2nd Fold:
+```{r}
+## Prediction data
+dp2 <- d %>% filter(x < 400000 & y > 1470000)
+dim(dp2)
+
+# Estimation data
+dd2 <- d
+for (i in 1:length(dp2$x)) {
+  dd2 <- dd2 %>% filter(x != dp2$x[i])
+  }
+dim(dd2)
+
+# Mesh construction
+coo2 <- cbind(dd2$long, dd2$lat)
+mesh2 <- inla.mesh.2d(loc = coo2, max.edge = c(0.1, 5), cutoff = 0.01)
+plot(mesh2)
+points(coo2, col = "red")
+
+# SPDE2 Matérn
+spde2 <- inla.spde2.matern(mesh = mesh2, alpha = 2, constr = TRUE)
+
+indexs2 <- inla.spde.make.index("s", spde2$n.spde)
+A2 <- inla.spde.make.A(mesh = mesh2, loc = coo2)
+
+coop2 <- cbind("x" = dp2$x, "y" = dp2$y)
+Ap2 <- inla.spde.make.A(mesh = mesh2, loc = coop2)
+
+# stack for estimation stk.e
+stk.e.2 <- inla.stack(tag = "est", data = list(y = dd2$positive, numtrials = dd2$total),
+                      A = list(1, A2), effects = list(data.frame(b0 = 1, altitude = dd2$alt), s = indexs2))
+
+# stack for prediction stk.p
+stk.p.2 <- inla.stack(tag = "pred", data = list(y = NA, numtrials = NA), A = list(1, Ap2),
+                      effects = list(data.frame(b0 = 1, altitude = dp2[, 8]), s = indexs2))
+
+# stk.full has stk.e and stk.p
+stk.full2 <- inla.stack(stk.e.2, stk.p.2)
+
+formula2 <- y ~ 0 + b0 + altitude + f(s, model = spde2)
+
+res.gambia2 <- inla(formula2, family = "binomial", Ntrials = numtrials,
+                    control.family = list(link = "logit"),
+                    data = inla.stack.data(stk.full2),
+                    control.predictor = list(compute = TRUE, link = 1, A = inla.stack.A(stk.full2)))
+
+summary(res.gambia2)
+
+# Computing (1/N)*sum((y_i - yhat_i)^2), where yhat_i is the out-of-sample predicted value of y_i given N_i
+index2 <- inla.stack.index(stack = stk.full2, tag = "pred")$data
+gambia.mean.prev2 <- res.gambia2$summary.fitted.values[index2, "mean"]
+N_i.2 <- dp2$total
+gambia.y.hat2 <- gambia.mean.prev2*N_i.2
+N.2 <- sum(dp2$total)
+(1/N.2)*(sum((dp2$positive - gambia.y.hat2)^2))
+```
+
+#### INLA Model for 3rd Fold:
+```{r}
+## Prediction data
+dp3 <- d %>% filter(x > 400000 & x < 550000)
+dim(dp3)
+
+# Estimation data
+dd3 <- d
+for (i in 1:length(dp3$x)) {
+  dd3 <- dd3 %>% filter(x != dp3$x[i])
+  }
+dim(dd3)
+
+# Mesh construction
+coo3 <- cbind(dd3$long, dd3$lat)
+mesh3 <- inla.mesh.2d(loc = coo3, max.edge = c(0.1, 5), cutoff = 0.01)
+plot(mesh3)
+points(coo3, col = "red")
+
+# SPDE2 Matérn
+spde3 <- inla.spde2.matern(mesh = mesh3, alpha = 2, constr = TRUE)
+
+indexs3 <- inla.spde.make.index("s", spde3$n.spde)
+A3 <- inla.spde.make.A(mesh = mesh3, loc = coo3)
+
+coop3 <- cbind("x" = dp3$x, "y" = dp3$y)
+Ap3 <- inla.spde.make.A(mesh = mesh3, loc = coop3)
+
+# stack for estimation stk.e
+stk.e.3 <- inla.stack(tag = "est", data = list(y = dd3$positive, numtrials = dd3$total),
+                      A = list(1, A3), effects = list(data.frame(b0 = 1, altitude = dd3$alt), s = indexs3))
+
+# stack for prediction stk.p
+stk.p.3 <- inla.stack(tag = "pred", data = list(y = NA, numtrials = NA), A = list(1, Ap3),
+                      effects = list(data.frame(b0 = 1, altitude = dp3[, 8]), s = indexs3))
+
+# stk.full has stk.e and stk.p
+stk.full3 <- inla.stack(stk.e.3, stk.p.3)
+
+formula3 <- y ~ 0 + b0 + altitude + f(s, model = spde3)
+
+res.gambia3 <- inla(formula3, family = "binomial", Ntrials = numtrials,
+                    control.family = list(link = "logit"),
+                    data = inla.stack.data(stk.full3),
+                    control.predictor = list(compute = TRUE, link = 1, A = inla.stack.A(stk.full3)))
+
+summary(res.gambia3)
+
+# Computing (1/N)*sum((y_i - yhat_i)^2), where yhat_i is the out-of-sample predicted value of y_i given N_i
+index3 <- inla.stack.index(stack = stk.full3, tag = "pred")$data
+gambia.mean.prev3 <- res.gambia3$summary.fitted.values[index3, "mean"]
+N_i.3 <- dp3$total
+gambia.y.hat3 <- gambia.mean.prev3*N_i.3
+N.3 <- sum(dp3$total)
+(1/N.3)*(sum((dp3$positive - gambia.y.hat3)^2))
+```
+
+#### INLA Model for 4th Fold:
+```{r}
+## Prediction data
+dp4 <- d %>% filter(x > 550000)
+dim(dp4)
+
+# Estimation data
+dd4 <- d
+for (i in 1:length(dp4$x)) {
+  dd4 <- dd4 %>% filter(x != dp4$x[i])
+  }
+dim(dd4)
+
+# Mesh construction
+coo4 <- cbind(dd4$long, dd4$lat)
+mesh4 <- inla.mesh.2d(loc = coo4, max.edge = c(0.1, 5), cutoff = 0.01)
+plot(mesh4)
+points(coo4, col = "red")
+
+# SPDE2 Matérn
+spde4 <- inla.spde2.matern(mesh = mesh4, alpha = 2, constr = TRUE)
+
+indexs4 <- inla.spde.make.index("s", spde4$n.spde)
+A4 <- inla.spde.make.A(mesh = mesh4, loc = coo4)
+
+coop4 <- cbind("x" = dp4$x, "y" = dp4$y)
+Ap4 <- inla.spde.make.A(mesh = mesh4, loc = coop4)
+
+# stack for estimation stk.e
+stk.e.4 <- inla.stack(tag = "est", data = list(y = dd4$positive, numtrials = dd4$total),
+                      A = list(1, A4), effects = list(data.frame(b0 = 1, altitude = dd4$alt), s = indexs4))
+
+# stack for prediction stk.p
+stk.p.4 <- inla.stack(tag = "pred", data = list(y = NA, numtrials = NA), A = list(1, Ap4),
+                      effects = list(data.frame(b0 = 1, altitude = dp4[, 8]), s = indexs4))
+
+# stk.full has stk.e and stk.p
+stk.full4 <- inla.stack(stk.e.4, stk.p.4)
+
+formula4 <- y ~ 0 + b0 + altitude + f(s, model = spde4)
+
+res.gambia4 <- inla(formula4, family = "binomial", Ntrials = numtrials,
+                    control.family = list(link = "logit"),
+                    data = inla.stack.data(stk.full4),
+                    control.predictor = list(compute = TRUE, link = 1, A = inla.stack.A(stk.full4)))
+
+summary(res.gambia4)
+
+# Computing (1/N)*sum((y_i - yhat_i)^2), where yhat_i is the out-of-sample predicted value of y_i given N_i
+index4 <- inla.stack.index(stack = stk.full4, tag = "pred")$data
+gambia.mean.prev4 <- res.gambia4$summary.fitted.values[index4, "mean"]
+N_i.4 <- dp4$total
+gambia.y.hat4 <- gambia.mean.prev4*N_i.4
+N.4 <- sum(dp4$total)
+(1/N.4)*(sum((dp4$positive - gambia.y.hat4)^2))
+```
+
+#### Map that shows how the Data are Partitioned into the 4 Folds:
+```{r}
+# Map to show the 4 Folds of the Data
+colors <- c("1st Fold" = "red", "2nd Fold" = "blue", "3rd Fold" = "orange",
+            "4th Fold" = "purple")
+
+ggplot() +
+  geom_point(data = tibble(long = coop[, 1], lat = coop[, 2], gambia.y.hat),
+             aes(long, lat, col = "1st Fold")) +
+  geom_point(data = tibble(long = coop2[, 1], lat = coop2[, 2], gambia.y.hat2),
+             aes(long, lat, col = "2nd Fold")) +
+  geom_point(data = tibble(long = coop3[, 1], lat = coop3[, 2], gambia.y.hat3),
+             aes(long, lat, col = "3rd Fold")) +
+  geom_point(data = tibble(long = coop4[, 1], lat = coop4[, 2], gambia.y.hat4),
+             aes(long, lat, col = "4th Fold")) +
+  xlab("Longitude") + ylab("Latitude") + ggtitle("4 Folds of the Data") +
+  labs(color = "Fold")
+
+# Map of the corresponding "y.hat" (number of positive results) for each of the folds:
+# 1st Fold:
+ggplot(data = tibble(long = coop[, 1], lat = coop[, 2], gambia.y.hat), aes(long, lat)) +
+  geom_point(aes(col = gambia.y.hat)) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Predicted # of Positive Results for Fold #1") +
+  guides(color = guide_legend("Count")) +
+  scale_color_viridis_c()
+
+# 2nd Fold:
+ggplot(data = tibble(long = coop2[, 1], lat = coop2[, 2], gambia.y.hat2), aes(long, lat)) +
+  geom_point(aes(col = gambia.y.hat2)) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Predicted # of Positive Results for Fold #2") +
+  guides(color = guide_legend("Count")) +
+  scale_color_viridis_c()
+
+# 3rd Fold:
+ggplot(data = tibble(long = coop3[, 1], lat = coop3[, 2], gambia.y.hat3), aes(long, lat)) +
+  geom_point(aes(col = gambia.y.hat3)) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Predicted # of Positive Results for Fold #3") +
+  guides(color = guide_legend("Count")) +
+  scale_color_viridis_c()
+
+# 4th Fold:
+ggplot(data = tibble(long = coop4[, 1], lat = coop4[, 2], gambia.y.hat4), aes(long, lat)) +
+  geom_point(aes(col = gambia.y.hat4)) +
+  xlab("Longitude") + ylab("Latitude") +
+  ggtitle("Predicted # of Positive Results for Fold #4") +
+  guides(color = guide_legend("Count")) +
+  scale_color_viridis_c()
+```
