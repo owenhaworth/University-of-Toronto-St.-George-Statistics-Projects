@@ -12,7 +12,7 @@ Click the link below to open the HTML file via GitHub Pages. You do not need Git
 
 ## Assignment
 
-* [Spatial Data Analysis](https://owenhaworth.github.io/University-of-Toronto-St.-George-Statistics-Projects/docs/Spatial-Data-Analysis.html)
+* [Spatial Data Analysis](https://owenhaworth.github.io/University-of-Toronto-St.-George-Statistics-Projects/Spatial-Data-Analysis.html)
 
 ## Overview
 
