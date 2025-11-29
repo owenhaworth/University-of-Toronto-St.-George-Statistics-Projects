@@ -10,8 +10,7 @@ The report was created using **R Markdown** and knitted to **HTML**, allowing al
 Click the link below to open the HTML file via **GitHub Pages**.  
 No GitHub account is required — the HTML will open like a regular website.
 
-**→ [_View the full HTML report here_](https://owenhaworth.github.io/spatial-data-analysis/docs/spatial-data-analysis.html)**
-
+**→ [_View the full HTML report here_](https://owenhaworth.github.io/spatial-malaria-analysis/docs/Spatial-Data-Analysis.html)**
 
 ---
 
