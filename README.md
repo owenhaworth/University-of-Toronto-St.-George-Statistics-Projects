@@ -30,7 +30,7 @@ This assignment explores spatial analysis of malaria prevalence in The Gambia us
 
         2. Matérn model using SPDE2
 
-        3.Matérn model with penalized complexity priors
+        3. Matérn model with penalized complexity priors
 
     Construct meshes, prediction stacks, and prepare data for model fitting.
 
